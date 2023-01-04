@@ -1,0 +1,1165 @@
+---
+title: "P01- SNA_FinalProject - 2022"
+output:
+  html_document: default
+  pdf_document: default
+Author: Elham Babaei
+---
+
+```{r setup}
+library(statnet)
+
+#library("network") 
+#library("sna")     # sns allows to do descriptive analysis in network
+library("igraph")       # use igraph for visualization 
+
+#install.packages("CliquePercolation")
+library(CliquePercolation)
+
+#if(!require(weatherData)) install.packages("weatherData",repos = "http://cran.us.r-project.org")
+#install.packages("weatherData",repos = "http://cran.us.r-project.org")
+```
+
+In P01 file, we have 300 authors and 4732 events. The incidence matrix shows a two mode network, author-paper relationship.
+There are some repeated rows in the main dataset. We have to make sure all the values in incidence matrix are 0 and 1. If an author has participated in a paper the value is 1 otherwise is 0.
+```{r}
+# Incidence matrix - two-mode
+incmat <- read.csv("P01_IncMat.csv",header = T, row.names = 1)
+incmat <- as.matrix(incmat)
+#incmat
+
+class(incmat)
+typeof(incmat)
+dim(incmat)    # authors - papers
+incmat[incmat>1] <- 1          
+min(incmat)
+max(incmat)
+
+#gplot(IncMat, gmode="twomode",displaylabels = F)
+```
+
+We change the diagonal of adjacency matrix to values zero to avoid circle edges to each node itself because in this case We cannot obtaing nice visualizations. 
+
+```{r}
+#Adjacency matrix - one-mode
+adjmat <- incmat %*% t(incmat)    # nodes ( author - author)
+diag(adjmat) <- 0
+class(adjmat)
+typeof(adjmat)
+dim(adjmat)
+min(adjmat)
+median(adjmat)
+max(adjmat)    # maximum weight between pair of authors ( some authors have participated in 172 common events)
+
+#adjmat
+```
+
+The attributes extracted from the dataset are the following:
+
+Role, University, Localization, Faculty, Gender, Academic_Age, Age   
+```{r}
+# Import vertex attributes (this can be left as dataframe)
+nodeInfo <- read.csv("P01_NodeAttr.csv",header=TRUE,stringsAsFactors=FALSE, sep=",")
+nodeInfo
+```
+
+```{r}
+summary(nodeInfo)
+```
+
+We create the network from the adjacency matrix.
+
+```{r}
+# network
+net <- network(adjmat,directed=FALSE) 
+
+# Add nodal attributes to a network object
+net %v% "Role" <- nodeInfo$Role
+net %v% "University" <- nodeInfo$University
+net %v% "Localization"  <- nodeInfo$Localization
+net %v% "Faculty"  <- nodeInfo$Faculty
+net %v% "Gender" <- nodeInfo$Gender
+net %v% "Academic_Age" <- nodeInfo$Academic_Age
+net %v% "Age"  <- nodeInfo$Age
+
+net         # Get a quick description of the data
+```
+
+```{r}
+network::list.vertex.attributes(net) 
+net %v% "vertex.names"          
+```
+
+
+# Descriptive Analysis and Visualization 
+
+We use either `network` and `igraph` package for this purpose.
+
+```{r}
+is.network(net)
+class(net)
+network.size(net)
+sna::is.connected(net)   #False
+isolates(net)            #shows the position of isolated nodes
+length(isolates(net))    # shows the number of isolated nodes
+```
+
+The density of the network is very small
+```{r}
+gden(net, mode="graph")    #density - sna
+```
+
+```{r}
+# Dyadic reciprocity   this graph is not directed
+
+#grecip(net, measure="dyadic.nonnull") 
+#grecip(net, measure="dyadic")
+#grecip(net, measure="edgewise")
+```
+
+
+```{r}
+# Transitivity
+trans <- gtrans(net, mode="graph") 
+trans
+```
+
+```{r}
+# Degree
+deg <- sna::degree(net, gmode = "graph")    #shows the degree of all nodes
+deg
+max(deg)
+
+```
+```{r}
+hist(deg, xlab="degree", main="P01- Degree distribution", prob=F, col = "light blue")
+```
+
+
+```{r}
+#Betweenness
+bet <- sna::betweenness(net, gmode="graph") 
+bet       #not normalized
+
+betdf <- data.frame(net %v% "vertex.name", bet) 
+betdf[order(betdf$bet, decreasing = TRUE), c(1,2)]
+
+gplot(net, vertex.cex=sqrt(bet)/25, gmode="graph", displaylabels = F, 
+      label.cex = 0.8, main="P01- Network \n Node size: sqrt(betweennes)/25") 
+```
+
+Since the graph is not connected, closeness centrality cannot be defined.
+```{r}
+# Closeness
+clo <- sna::closeness(net) 
+#clo
+#hist(clo)
+
+```
+
+
+
+```{r}
+# Eigenvector centrality
+ev <- sna::evcent(net) 
+ev
+hist(ev, main = "P01- Eigenvector Centrality", col="light green")
+
+```
+
+```{r}
+#Subnetwork censuses
+dc <- sna::dyad.census(net)
+dc
+tc <- sna::triad.census(net, mode = 'graph')
+tc
+barplot(tc, names.arg=colnames(tc), las=2, col=7, main = "P01- Triadic census")
+#tc[-1]  # all the values except the first one
+#barplot(tc[-1]/sum(sna::triad.census(net)[-1]), names.arg=colnames(tc)[-1], las=2)
+```
+
+``` {r}
+# Kpath and kcycle
+kp <- kpath.census(net, mode="graph", maxlen=5, tabulate.by.vertex=T) # Count paths of length <=5
+#kp
+
+kc <- kcycle.census(net, maxlen = 5, mode = "graph", tabulate.by.vertex = T) # Count cycles of length <=5
+#kc
+```
+
+Since the graph is not directed, strong and weak connected components are the same.
+
+There are 45 connected components.
+``` {r}
+#Components 
+comp <- sna::components(net) # the number of components
+comp
+
+cl <- component.largest(net)  # true if the vertex belongs to largest component, false otherwise
+
+gplot(net[cl,cl], boxed.lab=FALSE, label.cex=0.5,label.col=4, displaylabels = F, gmode = "graph",
+      label=network.vertex.names(net)[cl], main="P01- The largest connected component")
+
+``` 
+
+```{r}
+#Cliques census
+cc<-clique.census(net,clique.comembership="bysize")
+#cc
+```
+
+# Descriptive Analysis and Visualization using igraph package
+
+The values in the adjecency matrix are considered as edge weight 
+```{r}
+# create a graph (igraph object)
+options(warn = -1)
+mygraph <- graph_from_adjacency_matrix(adjmatrix = adjmat, mode="undirected", weighted = TRUE)
+
+mygraph <- set_vertex_attr(mygraph,name = "Role", value = as.character(nodeInfo$Role))
+mygraph <- set_vertex_attr(mygraph,"University", value = as.character(nodeInfo$University))
+mygraph <- set_vertex_attr(mygraph,"Localization", value = as.character(nodeInfo$Localization))
+mygraph <- set_vertex_attr(mygraph,"Faculty", value = as.character(nodeInfo$Faculty))
+mygraph <- set_vertex_attr(mygraph,"Gender", value = as.character(nodeInfo$Gender))
+mygraph <- set_vertex_attr(mygraph,"Academic_Age", value = as.integer(nodeInfo$Academic_Age))
+mygraph <- set_vertex_attr(mygraph,"Age", value = as.integer(nodeInfo$Age))
+
+mygraph
+```
+
+The distribution of edge weights is very skewed and shows that the pair of authors usually contribute in less than 5 papers together. The maximum weight is 54.
+```{r}
+max(E(mygraph)$weight)    # is the same max value in adj matrix . correct
+min(E(mygraph)$weight)
+#V(mygraph)$name
+
+class(E(mygraph)$weight)
+#E(mygraph)$weight
+
+hist(E(mygraph)$weight, col="lightblue", xlab="Edge weight", ylab="Frequency", 
+     main="P01- Edge weight Distribution")
+
+```
+
+```{r}
+class(mygraph)
+vcount(mygraph)
+ecount(mygraph)
+edge_density(mygraph)
+is.connected(mygraph)
+
+plot(mygraph,vertex.size=4 ,vertex.label=NA, vertex.label.cex=0.2, edge.arrow.size=0.4,
+     main="P01- Graph")
+
+```
+
+```{r}
+igraph::dyad.census(mygraph)
+
+igraph::triad.census(mygraph)  #Undirected graph
+reciprocity(mygraph, mode="ratio") 
+
+```
+
+Here we look at the neighbors of each node having the distance 1 or 2 from that node.
+We also show the graph for the node `Adelchi Azzalini`.
+```{r}
+# neighborhood
+k.nbhds <- graph.neighborhood(mygraph, order=1) 
+sapply(k.nbhds, vcount)
+k.1 <- k.nbhds[[1]]   # the subgraph created by neighbors of node number 1 with distance equal to 1
+edge_density(k.1)
+
+
+k.nbhds2 <- graph.neighborhood(mygraph, order=2) 
+sapply(k.nbhds2, vcount)
+k.1.2 <- k.nbhds2[[1]]   # the subgraph created by neighbors of node number 1 with distance equal to 2
+edge_density(k.1.2)
+
+edge_density(mygraph)
+
+plot(k.1, vertex.label.cex=0.8, vertex.cex=0.5 , 
+     main=" P01- Neighborhood of order 1 for 'Adelchi Azzalini' ")
+plot(k.1.2, vertex.label.cex=0.8, vertex.cex=0.5, 
+     main=" P01- Neighborhood of order 2 for 'Adelchi Azzalini' ")
+
+```
+
+```{r}
+# degree dist in igraph
+d.mygraph <- degree(mygraph)
+#d.mygraph
+dd.mygraph <- degree.distribution(mygraph)
+#dd.mygraph
+
+hist(degree(mygraph), col="lightblue", xlim=c(0,12), xlab="Vertex Degree", ylab="Frequency", 
+     main="P01- Degree Distribution") 
+
+```
+Vertex strength for each vertex is the sum of edge weights of the adjacent edges for that vertex.
+```{r}
+#Vertex strength
+hist(graph.strength(mygraph), col="pink", xlab="Vertex Strength", ylab="Frequency",
+     main="P01- Vertex strength distribution") 
+```
+Edge betweennes is defined by the number of geodesic distances (shortest paths) going through that edge.
+
+The result shows that the statistician `Francesco Bartolucci` plays the most important role in terms of edge betweeness in the graph. This shows that he has many connection with other authors.
+```{r}
+# Edge betweennes 
+eb <- edge.betweenness(mygraph)
+#eb
+E(mygraph)[order(eb, decreasing=T)[1:5]] # the first five edges with highest edge betweeness
+
+```
+
+There are 995 cliques of sizes from 1 to maximum 6.
+```{r}
+#cliques
+cliques.mygraph <- cliques(mygraph)
+
+length((cliques.mygraph))
+#shows the number of cliques of different sizes 
+table(sapply(cliques(mygraph), length)) 
+
+
+```
+
+We look at cliques of size 6
+
+```{r}
+which(sapply(cliques(mygraph), length)==6)  # which cliques of order 6
+cliques.mygraph[945]
+cliques.mygraph[947]
+```
+
+```{r}
+# the induced subgraph created by the nodes of clique of order 6
+plot(induced.subgraph(mygraph, cliques.mygraph[[945]]), vertex.cex=2, vertex.label.cex=0.8,
+     main="P01- The largest clique of size 6")  
+plot(induced.subgraph(mygraph, cliques.mygraph[[947]]), vertex.cex=2, vertex.label.cex=0.8,
+     main="P01- The largest clique of size 6")
+
+```
+
+Cliques of larger sizes necessarily include cliques of smaller sizes.
+For instance cliques of order 4 are included in cliques of order 5. so they are not counted in maximal cliques
+```{r}
+# the number of maximal cliques of different sizes 
+print("Maximal cliques of different sizes: ")
+table(sapply(maximal.cliques(mygraph), length)) 
+```
+
+We look at the induced subgraph created by neighbors of distance 1 for the node professor `Nicola Torelli` and the density of the resulted subgraph which is higher than the density of the whole graph.
+```{r}
+#Ego-density (or local density)
+ego.instr <- induced.subgraph(mygraph, neighborhood(mygraph, order= 1, nodes= 227)[[1]]) 
+#neighborhood of node number 227 (or we can use the label of node, node="Nicola TORELLI") 
+#order is the same geodesic distance                                                                  
+edge_density(mygraph)
+edge_density(ego.instr)
+
+plot(ego.instr, vertex.cex=0.3, vertex.label.cex=0.8, main="P01- Induced subgraph for 'Nicola Torelli'")   
+```
+The authors `Nicola TORELLI`, `Matilde TREVISANI`, `Francesco PAULI`, and `Gabriella SCHOIER` are all from the University of Trieste.
+
+Then look at the local transitivity for these authors.
+```{r}
+#transitivity
+transitivity(mygraph)   # the ratio of the count of triangles and connected triples in the graph.
+
+#The local transitivity of a vertex is the ratio of the count of triangles connected to the vertex 
+#and the triples centered on the vertex
+transitivity(mygraph, "local", vids=c(227,206, 111, 116))
+transitivity(mygraph, "local", vids=c("Nicola TORELLI", "Matilde TREVISANI", 
+                                      "Francesco PAULI", "Gabriella SCHOIER"))
+
+```
+
+```{r}
+# path length
+print("Average path length:")
+average.path.length(mygraph)
+print("Diameter:")
+diameter(mygraph)           # the length of the longest geodesic distance.
+```
+
+The number of connected components is the same 45 that we obtained using the Network package.
+
+```{r}
+#components
+
+table(sapply(decompose.graph(mygraph), vcount))  
+
+comp <- igraph::components(mygraph)
+
+#groups(comp)
+
+#component_distribution(mygraph, cumulative = FALSE, mul.size = FALSE)
+
+allcomps <- decompose(mygraph)
+
+gc <- allcomps[[1]] #giant component
+print(" Giant component:")
+gc
+#vcount(gc)
+#ecount(gc)
+
+plot(gc,vertex.label="",  vertex.size= 3, main="P01- The giant component") 
+plot(allcomps[[4]])
+
+
+```
+
+
+```{r}
+#cut vertices in the giant component
+gc.cut.vertices <- articulation.points(gc)
+
+print("The number and proportion of cut vertices in giant component:")
+length(gc.cut.vertices)
+length(gc.cut.vertices)/vcount(gc) # the proportion of cut vertices 
+                                                # if this value is high, the network is vulnerable
+
+```
+
+```{r}
+#cut vertices in the graph
+mygraph.cut.vertices <- articulation.points(mygraph)
+
+print("The number and proportion of cut vertices in the whole graph:")
+length(mygraph.cut.vertices)
+length(mygraph.cut.vertices)/vcount(mygraph) # the proportion of cut vertices 
+                                                # if this value is high, the network is vulnerable
+```
+
+
+#Visualization
+
+
+```{r}
+# looking at some useful vertex attributes for visualization
+table(V(mygraph)$Gender)
+table(V(mygraph)$Localization)
+table(V(mygraph)$Role)
+
+table(V(mygraph)$Faculty)
+table(V(mygraph)$Academic_Age)
+table(V(mygraph)$Age)
+table(V(mygraph)$University)
+```
+
+```{r}
+gplot(incmat, gmode="twomode",displaylabels = F, label.cex = 0.7)
+
+gplot(adjmat, gmode="graph",displaylabels = F, label.cex = 0.7, edge.lwd=adjmat, main="P01-Network") 
+## the lines are proportional to edg.lwd= adjmat as weights
+```
+First of all we visualize the network using different layouts and the strength of the nodes as the node size.
+Then we pick the best visualization and we try other measures for node size on it.
+
+We also consider orange color for female and light blue color for male authors. 
+The edges between two female authors are pink, between two male authors are blue and between a male and a female author dark gray.
+
+Also, the width of edges is specified by their weight divided by 10.
+
+```{r}
+set.seed(42)
+
+E(mygraph)$width <- E(mygraph)$weight/10
+
+#V(mygraph)[V(mygraph)$Role=="PA"]$color <-1
+#V(mygraph)[V(mygraph)$Role=="PO"]$color <-2
+#V(mygraph)[V(mygraph)$Role=="RU"]$color <-3
+
+#V(mygraph)[V(mygraph)$Gender=="F"]$shape <- "circle"
+V(mygraph)[V(mygraph)$Gender=="F"]$color <- "orange"
+#V(mygraph)[V(mygraph)$Gender=="M"]$shape <- "square"
+V(mygraph)[V(mygraph)$Gender=="M"]$color <- "lightblue"
+
+V(mygraph)$size <- sqrt(graph.strength(mygraph))   # strength of the node as the nodes size 
+#V(mygraph)$size2 <- V(mygraph)$size * .5
+
+female <- V(mygraph)[Gender=="F"]
+male  <- V(mygraph)[Gender=="M"]
+E(mygraph)[ female %--% male ]$color <- "black"          
+E(mygraph)[ female %--% female ]$color <- "red"    
+E(mygraph)[ male %--% male ]$color <- "blue" 
+
+#igraph.options(vertex.size=6, vertex.label=NA, vertex.label.dist=1, vertex.label.cex=0.2, edge.color="ligh tblue", edge.arrow.size=0.4)
+
+```
+
+ 
+```{r}
+# random layout
+plot(mygraph, layout=layout_randomly, vertex.label=NA)
+title(" P01- Random layout\n Node size = node strength")
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+```{r}
+edge_weight <- E(mygraph)$weight
+print("P01-The first five pair of authors with highets co-authorship")
+E(mygraph)[order(edge_weight, decreasing=T)[1:5]]
+
+```
+
+
+```{r}
+# nicely layout
+plot(mygraph, layout=layout_nicely, vertex.label=NA)
+title(" P01- Nicely layout\n Node size = node strength")
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+
+```{r}
+# circular layout
+plot(mygraph, layout=layout.circle, vertex.label=NA)
+title(" P01- Circular layout\n Node size = node strength", cex.main=0.8)
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+```{r}
+# Fruchterman & Reingold layout
+plot(mygraph, layout=layout_with_fr, vertex.label=NA)
+title(" P01- Fruchterman & Reingold layout\n Node size = node strength")
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+```{r}
+# MDS layout
+plot(mygraph, layout=layout_with_mds(mygraph), vertex.label=NA)
+title(" P01- MDS layout \n Node size = node strength")
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+```{r}
+# Kamada-Kawai layout
+plot(mygraph, layout=layout_with_kk, vertex.label=NA)
+title(" P01- Kamada-Kawai layout \n Node size = node strength")
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+It seems the best visualization is the one using the layout `Fruchterman & Reingold`.
+
+We try it with other measures of node size.
+```{r}
+#Compute node degree and use it to set node size in the graph
+deg_g <- igraph::degree(mygraph, mode = "all", normalized = T)
+V(mygraph)$size <- deg_g*100     # because these values are small
+#V(mygraph)$name <- 1:vcount(mygraph)
+V(mygraph)$label.color <- "blue"
+plot(mygraph, layout=layout_with_fr, vertex.label = " ", vertex.label.dist=0, vertex.label.cex=0.6) 
+title(main="P01- Fruchterman & Reingold layout\n Node size = node degree centrality", cex.main=1)
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+Closeness cannot be used since the graph in not connected.
+```{r}
+# Compute node betweenness and use it to set node size
+
+betw_g <- igraph::betweenness(mygraph, directed = F, normalized = T)
+#betw_g
+V(mygraph)$size <- betw_g*100
+V(mygraph)$label.color <- "blue"
+plot(mygraph, layout=layout_with_fr, vertex.label = " ",  vertex.label.dist=0, vertex.label.cex=0.6) 
+title(main="P01- Fruchterman & Reingold layout layout.\n Node size = betweenness centrality", cex.main=1)
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+The above visualization shows the authors with highest betweenness are females.
+```{r}
+#Compute node eigenvector and use it to set node size
+
+eigen_g <- eigen_centrality(mygraph)
+V(mygraph)$size <- eigen_g$vector*10
+V(mygraph)$label.color <- "blue"
+plot(mygraph, layout=layout_with_fr, vertex.label = "",  vertex.label.dist=0, vertex.label.cex=0.6) 
+title(main="P01- Fruchterman & Reingold layout layout.\n Node size = eigenvector centrality", cex.main=1)
+legend('bottomleft', fill=c("orange","lightblue", "red", "blue", "black"),
+       legend=c("Femal (F)","Male (M)", "F-F co-outhorship",
+                "M-M co-outhorship",
+                "F-M co-outhorship"),cex=0.75)
+```
+
+```{r}
+
+mygraph.adiacency <- graph_from_adjacency_matrix(adjmat, mode="undirected")
+mygraphm <- get.adjacency(mygraph.adiacency, sparse=F)     # is the same adj matrix
+
+class(mygraph.adiacency) # is a graph object
+edge_density(mygraph.adiacency)
+
+# Degree distribution
+par(mar=c(4,4,4,4)) ### set margins
+dd <- degree.distribution(mygraph.adiacency, cumulative=T, mode="all")
+plot(dd, pch=19, cex=0.8, col="orange", xlab="Degree", ylab="Cumulative", main = "P01- Cumulative degree distribution")
+```
+
+```{r}
+# Heatmap of the network matrix - sociomatrix representation
+#### reordering adiacency matrix according to clustering - geodesic distances 
+geomygraph<-distances(mygraph.adiacency, v = V(mygraph.adiacency), to = V(mygraph.adiacency), mode ="all", weights = NULL, 
+                  algorithm = "automatic")
+geomygraph[geomygraph==Inf]<-15
+geomygraph<-as.dist(geomygraph)
+hclust_geomygraph<-hclust(geomygraph, method = "complete", members = NULL)  #heirarchical clustering
+heatmap(mygraphm,Rowv=hclust_geomygraph$order,Colv="Rowv", scale="none")
+title(main="P01- heatmap plot ", cex.main=0.8)
+```
+
+```{r}
+###heatmap by gender
+palf <- colorRampPalette(c("lightblue", "red")) 
+heatmap(mygraphm[order(V(mygraph)$Gender), ], col = palf(10), labRow= rownames(mygraph), labCol= colnames(mygraph))
+title(main="P01- heatmap plot by gender ", cex.main=0.8)
+```
+
+
+```{r}
+
+### Circos graphs
+library(circlize)
+
+colnames(mygraphm) <- V(mygraph.adiacency)$name
+rownames(mygraphm) <- V(mygraph.adiacency)$name
+
+circos.clear()
+par(cex=0.5)
+circos.par( start.degree = 90, clock.wise = T)
+chordDiagram(mygraphm, symmetric=T, annotationTrack = c("name","grid"))       
+# the larger the slice in circle graph the larger the degree of the node
+```
+The following two chunks give an error because of lack of space. I comment it to be able to knit to pdf/HTML.
+
+```{r}
+
+### change the orientation of node label
+### pre-allocating an empty track and customizing the labels in it later
+
+# chordDiagram(mygraphm, symmetric=T, annotationTrack = "grid", 
+# preAllocateTracks = list(track.height = max(strwidth(unlist(dimnames(mygraphm))))))
+# 
+# circos.track(track.index = 1, panel.fun = function(x, y) {
+#   circos.text(CELL_META$xcenter, CELL_META$ylim[1], CELL_META$sector.index, 
+#               facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+# }, bg.border = NA) 
+# here set bg.border to NA is important
+```
+
+
+```{r}
+# now, the image with rotated labels
+
+# chordDiagram(mygraphm, annotationTrack = "grid", preAllocateTracks = 1)
+# circos.trackPlotRegion(track.index = 1, panel.fun = function(x, y) {
+#   xlim = get.cell.meta.data("xlim")
+#   ylim = get.cell.meta.data("ylim")
+#   sector.name = get.cell.meta.data("sector.index")
+#   circos.text(mean(xlim), ylim[1] + .1, sector.name, facing = "clockwise", niceFacing = TRUE, adj = c(0, 0.5))
+#   circos.axis(h = "top", labels.cex = 0.5, major.tick.percentage = 0.2, sector.index = sector.name, track.index = 2)
+# }, bg.border = NA)
+```
+
+# Community Detection
+
+The following chunk shows the number of nodes in each of 45 connected components.
+
+```{r}
+# membership to components (we have 45 components)
+
+mygraph.scc <- clusters(mygraph) # Extract the maximal (weakly or strongly) connected components of a graph
+
+#table(mygraph.scc$csize)
+
+#mygraph.scc$membership
+
+table(mygraph.scc$membership)
+
+scc <- induced.subgraph(mygraph, vids= mygraph.scc$membership==28)
+
+plot(scc, vertex.size=2 )
+```
+
+
+```{r}
+#K-core decomposition allows us to identify the core and the periphery of the network. A k-core is a maximal subnet of a network such that all nodes have at least degree K.
+
+# compute coreness
+kcores <- coreness(mygraph)
+coreness <- kcores
+str(coreness(mygraph))
+
+
+V(mygraph)$core <- coreness(mygraph, "all") # assign as node attribute the k-core to which nodes belong
+```
+
+
+```{r}
+# create layout
+
+CorenessLayout <- function(g) {
+  coreness <- graph.coreness(g);
+  xy <- array(NA, dim=c(length(coreness), 2));
+  
+  shells <- sort(unique(coreness));
+  for(shell in shells) {
+    v <- 1 - ((shell-1) / max(shells));
+    nodes_in_shell <- sum(coreness==shell);
+    angles <- seq(0,360,(360/nodes_in_shell));
+    angles <- angles[-length(angles)]; # remove last element
+    xy[coreness==shell, 1] <- sin(angles) * v;
+    xy[coreness==shell, 2] <- cos(angles) * v;
+  }
+  return(xy);
+}
+
+
+
+ll <- CorenessLayout(mygraph)
+
+# plot
+plot(mygraph, layout=ll, vertex.size=6, vertex.label=" ", vertex.label.cex=0.8, main='P01-Coreness')
+
+```
+
+```{r}
+# if you just need to know the vertices and not to build the subgraph 
+
+maxCoreness <- max(coreness)
+maxCoreness     # so k-core is actually 5-core
+verticesHavingMaxCoreness <- which(coreness == 5) 
+kcore <- induced.subgraph(graph=mygraph,vids=verticesHavingMaxCoreness)
+
+plot(kcore,  vertex.label=igraph::get.vertex.attribute(kcore,name='vert.names',index=V(kcore)), 
+     vertex.size=5,vertex.cex=2, vertex.label.cex=0.8, main="P01- Vertices having coreness 5")
+
+```
+With Girvan-newman algorithm we obtain 59 clusters.
+
+Cluster number 24 has the maximum number of members which is 25.
+```{r}
+# Girvan-newman algorithm
+options(warn = -1)
+
+gn.comm <- cluster_edge_betweenness(mygraph) 
+
+table(gn.comm$membership)
+max(table(gn.comm$membership))
+```
+
+```{r}
+is_hierarchical(gn.comm)
+plot_dendrogram(gn.comm)
+```
+
+
+
+```{r}
+# visualizing the result of dividing the network into communities
+colors <- rainbow(max(membership(gn.comm)))
+plot(gn.comm, mygraph, vertex.size = 6, vertex.color=colors[membership(gn.comm)], 
+     vertex.label = NA, edge.width = 1, main= "P01- Clusters from Girvan-Newman algorithm")
+```
+
+Modularity using Girvan-Newman algorithm is high and positive. so it is good.
+```{r}
+# computing modularity
+length(unique(membership(gn.comm))) # the number of clusters
+mod.gn <- modularity(mygraph,membership(gn.comm)) 
+mod.gn
+```
+
+```{r}
+# compute the intra-cluster density
+print("Intra cluster density for Girvan-Newman algorithm algorithm:")
+sapply(unique(membership(gn.comm)), function(gg) {
+  subg1<-induced.subgraph(mygraph, which(membership(gn.comm)==gg)) #membership id differs for each cluster
+  edge_density(subg1)
+})
+
+edge_density(mygraph) #overall density is not high
+```
+
+```{r}
+#get all combinations of communities and get inter-cluster edges
+
+cs <- data.frame(combn(unique(membership(gn.comm)),2))
+cx <- sapply(cs, function(x) {
+  es<-E(mygraph)[V(mygraph)[membership(gn.comm)==x[1]] %--% 
+                  V(mygraph)[membership(gn.comm)==x[2]]]    
+  length(es)
+})
+cbind(t(cs),inter.edges=cx)  # shows the number of edges between pair of communities. 
+```
+
+```{r}
+#evaluating cluster homogeneity
+
+#Gini index (complementary). The larger its value the larger cluster homogeneity according to a given actor attribute
+gini <- function(x){
+  f <- table(x)/length(x)
+  sum(f^2)
+}
+```
+
+
+```{r}
+#attach community labels as vertex attribute
+V(mygraph)$GN.cluster <- membership(gn.comm)
+
+gini(V(mygraph)$Role[V(mygraph)$GN.cluster==24])   # 24 is the largest cluster. output 1 means everyone in cluster number 24 belongs to the same community
+```
+
+gini index for cluster number 24 is not that high.
+
+```{r}
+# Louvain algorithm (modularity optimization)
+
+louv.clu <- cluster_louvain(mygraph)
+
+table(louv.clu$membership)
+max(table(louv.clu$membership))
+
+```
+
+Louian algorith creates 64 clusters. The largest one is cluster number 27 with 20 members.
+```{r}
+# visualizing the result of dividing the network into communities
+colors <- rainbow(max(membership(louv.clu)))
+plot(louv.clu, mygraph, vertex.size = 6, vertex.color=colors[membership(louv.clu)], vertex.label = NA, edge.width = 1, main= "P01- Clusters from Louvain algorithm")
+
+```
+
+
+```{r}
+length(unique(membership(louv.clu)))     
+modularity(mygraph,membership(louv.clu)) 
+```
+
+```{r}
+#attach community labels as vertex attribute
+V(mygraph)$LOUV.cluster <- membership(louv.clu)
+
+gini(V(mygraph)$Role[V(mygraph)$LOUV.cluster==27])   # 27 is the largest cluster. output 1 means everyone in cluster number 24 belongs to the same community
+
+```
+
+
+```{r}
+# compute the intra-cluster density
+print("Intra cluster density for Louvian algorithm:")
+sapply(unique(membership(louv.clu)), function(gg) {
+  subg1<-induced.subgraph(mygraph, which(membership(louv.clu)==gg)) #membership id differs for each cluster
+  edge_density(subg1)
+})
+
+edge_density(mygraph) #overall density is not high
+```
+
+Girvan Newman algorithm gives 59 clusters with modularity 0.82, while Louvain algorithm provides 66 clusters and modularity 0.80.
+
+So Girvan Newman algorithm is better in this case because of lower number of clusters and higher modularity. 
+
+```{r}
+# Clique percolation algorithm
+
+# weighted density
+sum(E(mygraph)$weight)/(vcount(mygraph)*(vcount(mygraph)-1)/2)
+
+# unweighted density
+length(E(mygraph)$weight)/(vcount(mygraph)*(vcount(mygraph)-1)/2)
+
+```
+
+Considering k=5 for Clique Percolation algorithm, there are 3 nodes shared between two cliques.
+```{r}
+options(warn = -1)
+
+cp.comm_w <-  cpAlgorithm(get.adjacency(mygraph, attr = "weight", sparse = F), k=5, method = "weighted", I=0.5) 
+#I: intensity threshold parameter
+#k is started from 3. 2 is not aallowed
+
+#cp.comm_w$list.of.communities.labels
+cp.comm_w$list.of.communities.numbers
+
+#cp.comm_w$shared.nodes.labels
+cp.comm_w$shared.nodes.numbers
+```
+
+
+# ERGM models
+
+
+```{r}
+# choosing a subgraph for ergm and dychotomising the edge weights
+ergm_graph = mygraph
+
+E(ergm_graph)$weight[E(ergm_graph)$weight < 10]=0
+E(ergm_graph)$weight[E(ergm_graph)$weight >0]=1
+#E(ergm_graph)$weight
+
+ergm_graph$vertexIDs <- c(1:vcount(ergm_graph))
+
+ergm_induced_graph = induced.subgraph(ergm_graph, 
+                                      vids = ergm_graph$vertexIDs[c(250:300)] )
+
+#ergm_induced_graph = subgraph.edges(ergm_graph, E(ergm_graph)[which(E(ergm_graph)$weight>0)])
+
+ergm_induced_graph
+vcount(ergm_induced_graph)
+ecount(ergm_induced_graph)
+plot(ergm_induced_graph, vertex.label=NA, vertex.size=5, main="P01- Sub-graph for ERGM")
+```
+
+```{r}
+# creating the network object for ergm
+
+ergm_induced_graph.m <- get.adjacency(ergm_induced_graph, sparse=F)     # is the same adj matrix
+
+ergm_induced_net <- as.network(ergm_induced_graph.m, directed=F)
+
+# Add nodal attributes to a network object
+ergm_induced_net %v% "Role" <- get.vertex.attribute(ergm_induced_graph)$Role
+ergm_induced_net %v% "University" <- get.vertex.attribute(ergm_induced_graph)$University
+ergm_induced_net %v% "Localization"  <- get.vertex.attribute(ergm_induced_graph)$Localization
+ergm_induced_net %v% "Faculty"  <- get.vertex.attribute(ergm_induced_graph)$Faculty
+ergm_induced_net %v% "Gender" <- get.vertex.attribute(ergm_induced_graph)$Gender
+ergm_induced_net %v% "Academic_Age" <- get.vertex.attribute(ergm_induced_graph)$Academic_Age
+ergm_induced_net %v% "Age"  <- get.vertex.attribute(ergm_induced_graph)$Age
+
+ergm_induced_net
+plot(ergm_induced_net, main="P01- Sub-network for ERGM")
+```
+
+The input of ergm model must be a network object. 
+
+So here we use the network that we created from the data. But since it is too large for ergm models, we choose an induced subgraph of it which considers only the cental zone in Italy.
+
+```{r}
+
+#network::list.vertex.attributes(net) 
+#net %v% "vertex.names"   
+
+
+#inducednet <- get.inducedSubgraph(net,v= d)
+#inducednet <- get.inducedSubgraph(net,v= (which(net%v%"Localization"=="North")))
+
+#inducednet <- get.inducedSubgraph(net,v= (which(net%v%"Localization"=="North")))
+
+#inducednet <- get.inducedSubgraph(net,v= (which(net%v%"Academic_Age" <10 & net%v%"Gender"=="M")))
+#inducednet <- get.inducedSubgraph(net,v= (which(net%v%"Academic_Age" <=7 )))
+#inducednet <- get.inducedSubgraph(net,v= (which(net%v%"University"=="Univ. TRIESTE" ))) 
+
+#inducednet
+#plot(inducednet)
+```
+
+
+```{r}
+#Let's start with baseline model (ER model)
+model.00 <- ergm(ergm_induced_net~edges) # fit model
+summary(model.00) # look in more depth
+#coef(model.01)
+
+```
+
+The probability of activating a tie randomly is equal to the density of the network.
+```{r}
+# the probability of activating a tie randomly
+print("The probability of activating a tie randomly:")
+plogis(coef(model.00)[1])
+print("Graph density:")
+gden(ergm_induced_net)  # unweighted density of the induced network
+
+```
+
+```{r}
+# goodness of fit
+gof(model.00)
+plot(gof(model.00))
+```
+
+```{r}
+#model.01
+
+#Geometrically weighted edgewise shared partner
+
+start.time <- Sys.time()
+
+set.seed(0)
+model.01 <- ergm(ergm_induced_net~edges+triangle)
+summary(model.01)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+```
+
+
+```{r}
+print("The probability of activating a tie randomly:")
+plogis(coef(model.01)[1])
+print("The probability of activating a tie that creates a triangle:")
+plogis(coef(model.01)[1]+coef(model.01)[2])
+```
+
+```{r}
+mcmc.diagnostics(model.01)
+```
+
+```{r}
+# goodness of fit
+gof(model.01)
+plot(gof(model.01))
+```
+
+```{r}
+#model.02
+
+#Geometrically weighted edgewise shared partner
+
+start.time <- Sys.time()
+
+set.seed(0)
+model.02 <- ergm(ergm_induced_net~edges+gwesp)
+summary(model.02)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+
+```
+
+```{r}
+print("The probability of activating a tie randomly:")
+plogis(coef(model.02)[1])
+print("The probability considering 2 coefficients:")
+plogis(coef(model.02)[1]+coef(model.02)[2])
+print("The probability considering 3 coefficients:")
+plogis(coef(model.02)[1]+coef(model.02)[2]+coef(model.02)[3])
+```
+
+```{r}
+mcmc.diagnostics(model.02)
+
+```
+
+```{r}
+# goodness of fit
+gof(model.02)
+plot(gof(model.02))
+```
+
+
+
+
+```{r}
+# model.03
+# Geometrically weighted degree distribution
+start.time <- Sys.time()
+
+model.03 <- ergm(ergm_induced_net~edges+ gwdegree)
+summary(model.03)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+print("The probability of activating a tie randomly:")
+plogis(coef(model.03)[1])
+print("The probability considering 2 coefficients:")
+plogis(coef(model.03)[1]+coef(model.03)[2])
+print("The probability considering 3 coefficients:")
+plogis(coef(model.03)[1]+coef(model.03)[2]+coef(model.03)[3])
+```
+
+```{r}
+mcmc.diagnostics(model.03)
+```
+Note: Some chunks give an error  so they are commented out to kit to pdf.
+```{r}
+# goodness of fit
+#summary(gof(model.03))
+#plot(gof(model.03))
+```
+
+
+
+```{r}
+# model.04
+#nodal attributes
+
+start.time <- Sys.time()
+
+model.04 <- ergm(ergm_induced_net~edges+
+                   absdiff("Academic_Age")+ 
+                   absdiff("Age")+ 
+                   nodematch("Role")+ nodefactor("Role")+
+                   nodematch("University")+ nodefactor("University")+
+                   nodematch("Gender")+ nodefactor("University")+
+                   nodematch("Faculty")+ nodefactor("Faculty"))
+summary(model.04)
+
+end.time <- Sys.time()
+time.taken <- end.time - start.time
+time.taken
+```
+
+
+```{r}
+print("The probability of activating a tie randomly:")
+plogis(coef(model.04)[1])
+print("The probability considering 2 coefficients:")
+plogis(coef(model.04)[1]+coef(model.04)[2])
+print("The probability considering 3 coefficients:")
+plogis(coef(model.04)[1]+coef(model.04)[2]+coef(model.04)[3])
+```
+
+```{r}
+#mcmc.diagnostics(model.04)
+```
+
+```{r}
+# goodness of fit
+#gof(model.04)
+#plot(gof(model.04))
+```
+
+```{r}
+# a simulated network from model.04
+#model.04.sim <- simulate(model.04,nsim=1)
+```
+
+```{r}
+#gplot(model.04.sim[[1]], label= model.04.sim[[1]] %v% "vertex.names", vertex.cex = model.04.sim[[1]] %v% )
+
+```
+
